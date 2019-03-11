@@ -6,75 +6,103 @@
 #include <r_util.h>
 #include <r_anal.h>
 
-typedef enum {
-	ModulePass, //output of rbin
-	FunctionPass, // function
-	BBPass, //basic block
-	//TODO path for path analysis
-} PassType;
 
-typedef struct pm PassManager;
-typedef struct pass Pass;
+/************************************************TEMPLATE STUFF************************************/
 /*
  * Always add elements to this structure at the bottom not at the begining,
  * so it is always backward compatiable
  */
 
-typedef struct pass{
-	char *name; //must be unique for every pass;
-	PassType t;
-	void (*registerDependencies)(PassManager *);
-	void *(*run)(PassManager *, Pass *p, void *object); // mandatory
-	void *(*invalidate)(PassManager *, Pass *p, void *object); //mandatory
-	void (*free_pass)(Pass *p);
-	void (*free_result)(void *);
-	void *customDataStructure;
-	//TODO  passes can come with their own set of commands
-} Pass;
+#define PASS(TYPE, TYPE_NAME) 											\
+	typedef struct _##TYPE_NAME##_pass TYPE_NAME##Pass; 							\
+	typedef struct _##TYPE_NAME##_pass {									\
+		char *name; /*must be unique for every pass*/							\
+		/*This function is used to register the dependency passes for this pass*/			\
+		void (*registerDependencies)(TYPE_NAME##PassManager *);						\
+		void *(*run)(TYPE_NAME##PassManager *, TYPE_NAME##Pass *p, TYPE *object); 			\
+		void *(*invalidate)(TYPE_NAME##PassManager *, TYPE_NAME##Pass *p, TYPE *object);		\
+		/*This callback gets called when this pass is about to be destroyed*/				\
+		void (*free_pass)(TYPE_NAME##Pass *p);								\
+		/*This callback gets calld when the invalidate cb returns new pointer than the one strored*/	\
+		void (*free_result)(void *);									\
+		/*Arbitrary data stored for the pass*/								\
+		void *customDataStructure;									\
+		/*TODO  passes can come with their own set of commands*/					\
+	} TYPE_NAME##Pass;
 
+
+/*
+ * They are all defined the same, but, different PassManager
+ * types accepts different PassRunners types which in turn wraps
+ * different passes, these different passes finally operates on one of bunch of types as
+ * Function, Module, basicBlock...etc
+ */
+#define DEFINE_PASSMANAGER(TYPE, TYPE_NAME)					\
+	typedef struct _##TYPE_NAME##_pm{					\
+		HtPP *passes; /*<char *Pass->name, PassRunner>*/		\
+		/*This can be used to detect circular dependencies*/		\
+		HtPP *running; /*<TYPE *object,HtPP<char *passName, NULL>>*/	\
+		RAnal *parent;							\
+	}TYPE_NAME##PassManager							\
+
+#define DECLARE_PASSMANAGER(TYPE, TYPE_NAME)\
+	typedef struct _##TYPE_NAME##_pm TYPE_NAME##PassManager
+
+
+#define PASSRUNNER(TYPE, TYPE_NAME)					\
+	typedef struct {						\
+		TYPE_NAME##Pass *p;					\
+		HtPP *passResults; /*<void *object, void *result>*/	\
+		TYPE_NAME##PassManager *parent;				\
+	} TYPE_NAME##PassRunner
+
+#define PASS_MANAGER_API(TYPE, TYPE_NAME, FUNC_NAME)							\
+	R_API TYPE_NAME##PassManager *FUNC_NAME##_new();						\
+	R_API RAnal *FUNC_NAME##_get_anal(TYPE_NAME##PassManager *pm);					\
+	R_API void FUNC_NAME##_invalidate(TYPE_NAME##PassManager *pm, TYPE *object);			\
+	R_API void FUNC_NAME##_set_anal(TYPE_NAME##PassManager *pm, RAnal *anal);			\
+	R_API void FUNC_NAME##_free(TYPE_NAME##PassManager *pm);					\
+	R_API bool FUNC_NAME##_register_pass(TYPE_NAME##PassManager *pm, TYPE_NAME##Pass *p);		\
+	R_API void *FUNC_NAME##_get_result(TYPE_NAME##PassManager *pm, char *passName, TYPE *object);	\
+	R_API void *FUNC_NAME##_get_cached_result(TYPE_NAME##PassManager *pm, char *passName, TYPE *object)
+
+
+
+/************************************TEMPLATE ENDS HERE********************************************/
 
 /*
  * Don't define this unless:-
  * A) You are testing **only** the internals of the passmanager.
  * B) You are extending the functionality of the passmanager.
  */
+DECLARE_PASSMANAGER(RAnalFunction, Function);
+DECLARE_PASSMANAGER(RAnalBlock, BasicBlock);
+DECLARE_PASSMANAGER(RBin, Bin);
+
+PASS(RAnalFunction, Function);
+PASS(RAnalBlock, BasicBlock);
+PASS(RBin, Bin);
+
+PASS_MANAGER_API(RAnalFunction, Function, fpm);
+PASS_MANAGER_API(RAnalBlock, BasicBlock, bbpm);
+PASS_MANAGER_API(RBin, Bin, bpm);
+
+//TODO Flow sensitive path sensive walker inter-procedural pass as well
+
 #ifdef PASSMANAGER_IMPLEMENTATION_FOR_INTERNAL_USE_ONLY
+PASSRUNNER(RAnalFunction, Function);
+PASSRUNNER(RAnalBlock, BasicBlock);
+PASSRUNNER(RBin, Bin);
 
 
-typedef struct pm{
-	PassType t;
-	HtPP *passes; //(k,v) = (char *Pass->name, Void *PassRunner)
-	RAnal *parent;
-}PassManager;
 
-typedef struct {
-	Pass *p;
-	HtPP *passResults; // (k,v) = (void *object, void *result)
-	PassManager *parent;
-} PassRunner;
-
+DEFINE_PASSMANAGER(RAnalFunction, Function);
+DEFINE_PASSMANAGER(RAnalBlock, BasicBlock);
+DEFINE_PASSMANAGER(RBin, Bin);
 
 #endif
 
-R_API PassManager *newPassManager(PassType t);//
-R_API void PM_setRAnal(PassManager *pm, RAnal *anal);//
-R_API RAnal *PM_getRAnal(PassManager *pm);//
-R_API void PM_destroyPassManager(PassManager *pm);
-R_API bool PM_registerPass(PassManager *pm, Pass *p);
-R_API void *PM_getResult(PassManager *pm, char *passName, void *object);
-R_API void *PM_getCachedResult(PassManager *pm, char *passName, void *object);
-/*
- * these 2 feel no good, the first 1 I can't file usecase for it
- * the second one is evil! it would assume that we know which pass we want to
- * invalidate. This doesn't sound like the right pattern, Each Pass should
- * identify how it would want to be invalidated, and all we have to do is just
- * notify them that something had changed in the objected.
- * when we invalidate an object if it is a module, we would need to invalidate
- * all the children functions as well as the children basic blocks.
- * same goes for function
- */
-//void PM_invalidateEveryThing(PassManager *PM);
-//void PM_invalidatePass(PassManager *PM, char *passName);
-R_API void PM_invalidate(PassManager *PM, void *object);
+
+
 
 #endif

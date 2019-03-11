@@ -268,7 +268,9 @@ typedef struct r_anal_fcn_meta_t {
  * variables, arguments, refs and even
  * description */
 typedef struct r_anal_function_t {
-	char* name;
+	char *name;
+	RList *bbs;
+	//Starting from here this is not used by pass manager
 	char* dsc; // For producing nice listings
 	ut32 _size;
 	int bits; // ((> bits 0) (set-bits bits))
@@ -294,7 +296,6 @@ typedef struct r_anal_function_t {
 	RList *locs; // list of local variables
 	RList *fcn_locs; //sorted list of a function *.loc refs
 	//RList *locals; // list of local labels -> moved to anal->sdb_fcns
-	RList *bbs;
 	RAnalFcnMeta meta;
 	RRangeTiny bbr;
 	RBNode rb;
